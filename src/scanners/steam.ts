@@ -70,8 +70,9 @@ export function parseAppManifest(raw: string): SteamManifestGame | null {
   const installDir = asString(state.installdir);
   if (appIdText === undefined || name === undefined || installDir === undefined) return null;
 
+  if (!/^\d+$/.test(appIdText)) return null;
   const appId = Number.parseInt(appIdText, 10);
-  if (!Number.isFinite(appId)) return null;
+  if (!Number.isSafeInteger(appId)) return null;
 
   return { appId, name, installDir };
 }

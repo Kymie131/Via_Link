@@ -33,6 +33,26 @@ describe('parseEpicManifest', () => {
     const blank = JSON.stringify({ AppName: 'x', DisplayName: '', InstallLocation: 'D:/G' });
     expect(parseEpicManifest(blank)).toBeNull();
   });
+
+  it('returns null for manifests that are not games', () => {
+    const dlc = JSON.stringify({
+      AppName: 'dlc',
+      DisplayName: 'Some DLC',
+      InstallLocation: 'D:/G/Dlc',
+      AppCategories: ['addons'],
+    });
+    expect(parseEpicManifest(dlc)).toBeNull();
+  });
+
+  it('accepts a manifest whose categories include games', () => {
+    const withGames = JSON.stringify({
+      AppName: 'x',
+      DisplayName: 'Game',
+      InstallLocation: 'D:/G/G',
+      AppCategories: ['addons', 'games'],
+    });
+    expect(parseEpicManifest(withGames)?.displayName).toBe('Game');
+  });
 });
 
 describe('toGame', () => {
