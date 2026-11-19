@@ -72,14 +72,19 @@ export function buildProgram(overrides: Partial<CliDependencies> = {}): Command 
     .option('--exe <path>', 'executable to launch')
     .action(async (options: { title: string; path: string; exe?: string }) => {
       const game = buildManualGame(options);
-      const { added } = await deps.store.upsert([game]);
-      if (added.length === 0) {
-        deps.error(`already in the library: ${game.id}`);
-        process.exitCode = EXIT_FAILURE;
+      const { added, updated } = await deps.store.upsert([game]);
+      if (added.length > 0) {
+        deps.log(`added: ${game.id} ${game.title}`);
+        process.exitCode = EXIT_OK;
         return;
       }
-      deps.log(`added: ${game.id} ${game.title}`);
-      process.exitCode = EXIT_OK;
+      if (updated.length > 0) {
+        deps.log(`updated: ${game.id} ${game.title}`);
+        process.exitCode = EXIT_OK;
+        return;
+      }
+      deps.error(`already in the library, no changes: ${game.id}`);
+      process.exitCode = EXIT_FAILURE;
     });
 
   program
