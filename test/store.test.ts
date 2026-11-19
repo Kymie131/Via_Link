@@ -85,6 +85,60 @@ describe('JsonLibraryStore', () => {
     expect(games.map((game) => game.title)).toEqual(['Curated Title']);
   });
 
+  it('applies manual precedence when the scanned entry is stored first', async () => {
+    const store = new JsonLibraryStore({ filePath });
+    await store.upsert([steamGame('Scanned Title', 55, 'D:\\Games\\Shared')]);
+
+    const manual = createGame({
+      title: 'Curated Title',
+      source: 'manual',
+      installPath: 'D:/Games/Shared',
+    });
+    await store.upsert([manual]);
+
+    const games = await store.load();
+    expect(games.map((game) => game.title).sort()).toEqual(['Curated Title', 'Scanned Title']);
+  });
+
+  it('applies manual precedence regardless of order inside one batch', async () => {
+    const store = new JsonLibraryStore({ filePath });
+    const manual = createGame({
+      title: 'Curated Title',
+      source: 'manual',
+      installPath: 'D:/Games/Shared',
+    });
+    const scanned = steamGame('Scanned Title', 55, 'D:\\Games\\Shared');
+
+    const { added } = await store.upsert([scanned, manual]);
+
+    expect(added.map((game) => game.title)).toEqual(['Curated Title']);
+    expect((await store.load()).map((game) => game.title)).toEqual(['Curated Title']);
+  });
+
+  it('reports no update when an identical entry is upserted again', async () => {
+    const store = new JsonLibraryStore({ filePath });
+    const game = steamGame('One', 1);
+    await store.upsert([game]);
+    const { added, updated } = await store.upsert([steamGame('One', 1)]);
+    expect(added).toHaveLength(0);
+    expect(updated).toHaveLength(0);
+  });
+
+  it('reports an update when only the executable changed', async () => {
+    const store = new JsonLibraryStore({ filePath });
+    const manual = createGame({ title: 'Same', source: 'manual', installPath: 'D:/Games/S' });
+    await store.upsert([manual]);
+    const withExe = createGame({
+      title: 'Same',
+      source: 'manual',
+      installPath: 'D:/Games/S',
+      executable: 'D:/Games/S/run.exe',
+    });
+    const { added, updated } = await store.upsert([withExe]);
+    expect(added).toHaveLength(0);
+    expect(updated).toHaveLength(1);
+  });
+
   it('removes a game by id', async () => {
     const store = new JsonLibraryStore({ filePath });
     const game = steamGame('One', 1);
@@ -118,6 +172,56 @@ describe('JsonLibraryStore', () => {
   it('throws on malformed JSON', async () => {
     await writeFile(filePath, '{ broken', 'utf8');
     await expect(new JsonLibraryStore({ filePath }).load()).rejects.toThrow();
+  });
+
+  it('rejects entries with an unknown source', async () => {
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        games: [
+          {
+            id: 'a',
+            title: 't',
+            source: 'nintendo',
+            installPath: 'x',
+            addedAt: 'now',
+            storeIds: {},
+          },
+        ],
+      }),
+      'utf8',
+    );
+    expect(await new JsonLibraryStore({ filePath }).load()).toEqual([]);
+  });
+
+  it('rejects entries whose store ids are not strings', async () => {
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        games: [
+          {
+            id: 'a',
+            title: 't',
+            source: 'steam',
+            installPath: 'x',
+            addedAt: 'now',
+            storeIds: { steam: 400 },
+          },
+          { id: 'b', title: 't', source: 'steam', installPath: 'x', addedAt: 'now', storeIds: [] },
+        ],
+      }),
+      'utf8',
+    );
+    expect(await new JsonLibraryStore({ filePath }).load()).toEqual([]);
+  });
+
+  it('throws on an unsupported library version', async () => {
+    await writeFile(filePath, JSON.stringify({ version: 99, games: [] }), 'utf8');
+    await expect(new JsonLibraryStore({ filePath }).load()).rejects.toThrow(
+      /unsupported library version/,
+    );
   });
 
   it('leaves no temporary files behind', async () => {

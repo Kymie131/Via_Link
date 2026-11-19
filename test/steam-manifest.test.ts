@@ -36,6 +36,13 @@ describe('parseAppManifest', () => {
     expect(parseAppManifest(bad)).toBeNull();
   });
 
+  it('returns null when appid carries a numeric prefix or fraction', () => {
+    const prefixed = '"AppState" { "appid" "400junk" "name" "X" "installdir" "X" }';
+    const fractional = '"AppState" { "appid" "1.5" "name" "X" "installdir" "X" }';
+    expect(parseAppManifest(prefixed)).toBeNull();
+    expect(parseAppManifest(fractional)).toBeNull();
+  });
+
   it('keeps titles with escapes intact', () => {
     const quoted = '"AppState" { "appid" "7" "name" "Tom \\"Cat\\"" "installdir" "Tom" }';
     expect(parseAppManifest(quoted)?.name).toBe('Tom "Cat"');

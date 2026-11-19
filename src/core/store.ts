@@ -1,7 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import type { Game } from './types.js';
+import type { Game, GameSource } from './types.js';
 import { gameKey, normalizePath } from './game.js';
 
 interface LibraryFile {
@@ -10,6 +10,7 @@ interface LibraryFile {
 }
 
 const CURRENT_VERSION = 1;
+const SOURCES: readonly GameSource[] = ['steam', 'epic', 'gog', 'emulator', 'manual'];
 
 export function defaultLibraryPath(env: NodeJS.ProcessEnv = process.env): string {
   const appData = env.APPDATA;
@@ -20,18 +21,30 @@ export function defaultLibraryPath(env: NodeJS.ProcessEnv = process.env): string
   return join(home, '.vialink', 'library.json');
 }
 
+function isSource(value: unknown): value is GameSource {
+  return typeof value === 'string' && (SOURCES as readonly string[]).includes(value);
+}
+
+function isStoreIds(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  return Object.values(value).every((entry) => typeof entry === 'string');
+}
+
 function isGame(value: unknown): value is Game {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.id === 'string' &&
-    typeof candidate.title === 'string' &&
-    typeof candidate.source === 'string' &&
-    typeof candidate.installPath === 'string' &&
-    typeof candidate.addedAt === 'string' &&
-    typeof candidate.storeIds === 'object' &&
-    candidate.storeIds !== null
-  );
+  if (
+    typeof candidate.id !== 'string' ||
+    typeof candidate.title !== 'string' ||
+    typeof candidate.installPath !== 'string' ||
+    typeof candidate.addedAt !== 'string' ||
+    !isSource(candidate.source) ||
+    !isStoreIds(candidate.storeIds)
+  ) {
+    return false;
+  }
+  if (candidate.executable !== undefined && typeof candidate.executable !== 'string') return false;
+  return candidate.steamAppId === undefined || typeof candidate.steamAppId === 'number';
 }
 
 function parseLibrary(raw: string): LibraryFile {
@@ -43,10 +56,24 @@ function parseLibrary(raw: string): LibraryFile {
   if (!Array.isArray(candidate.games)) {
     throw new Error('library file is missing a games array');
   }
-  return {
-    version: CURRENT_VERSION,
-    games: candidate.games.filter(isGame),
-  };
+  if (candidate.version !== CURRENT_VERSION) {
+    throw new Error(
+      `unsupported library version ${String(candidate.version)}; this build reads version ${CURRENT_VERSION}`,
+    );
+  }
+  return { version: CURRENT_VERSION, games: candidate.games.filter(isGame) };
+}
+
+function sameContent(a: Game, b: Game): boolean {
+  return (
+    a.title === b.title &&
+    a.installPath === b.installPath &&
+    a.executable === b.executable &&
+    a.steamAppId === b.steamAppId &&
+    a.storeIds.steam === b.storeIds.steam &&
+    a.storeIds.epic === b.storeIds.epic &&
+    a.storeIds.gog === b.storeIds.gog
+  );
 }
 
 export interface JsonLibraryStoreOptions {
@@ -81,27 +108,34 @@ export class JsonLibraryStore {
     const temporary = `${this.filePath}.${randomBytes(6).toString('hex')}.tmp`;
     await writeFile(temporary, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      try {
-        await rename(temporary, this.filePath);
-        return;
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY') throw error;
-        await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
+    try {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          await rename(temporary, this.filePath);
+          return;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY') throw error;
+          await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
+        }
       }
+      throw new Error(`could not replace ${this.filePath}`);
+    } catch (error) {
+      await unlink(temporary).catch(() => undefined);
+      throw error;
     }
-    throw new Error(`could not replace ${this.filePath}`);
   }
 
   async upsert(games: readonly Game[]): Promise<{ added: Game[]; updated: Game[] }> {
     const existing = await this.load();
     const byKey = new Map<string, Game>(existing.map((game) => [gameKey(game), game]));
-    const manualPaths = new Set(
-      existing
-        .filter((game) => game.source === 'manual')
-        .map((game) => normalizePath(game.installPath)),
-    );
+
+    // Manual precedence is computed up front from both the stored library and
+    // the incoming batch, so the result does not depend on iteration order.
+    const manualPaths = new Set<string>();
+    for (const game of [...existing, ...games]) {
+      if (game.source === 'manual') manualPaths.add(normalizePath(game.installPath));
+    }
 
     const added: Game[] = [];
     const updated: Game[] = [];
@@ -117,7 +151,13 @@ export class JsonLibraryStore {
         added.push(incoming);
         continue;
       }
+      if (current.source === 'manual' && incoming.source !== 'manual') {
+        continue;
+      }
       const merged: Game = { ...incoming, id: current.id, addedAt: current.addedAt };
+      if (sameContent(current, merged)) {
+        continue;
+      }
       byKey.set(key, merged);
       updated.push(merged);
     }

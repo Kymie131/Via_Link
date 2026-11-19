@@ -26,6 +26,13 @@ function pickString(source: Record<string, unknown>, key: string): string | unde
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
+function isGameCategory(record: Record<string, unknown>): boolean {
+  const categories = record.AppCategories;
+  if (categories === undefined) return true;
+  if (!Array.isArray(categories)) return false;
+  return categories.some((entry) => typeof entry === 'string' && entry.toLowerCase() === 'games');
+}
+
 export function parseEpicManifest(raw: string): EpicManifestGame | null {
   let parsed: unknown;
   try {
@@ -36,6 +43,8 @@ export function parseEpicManifest(raw: string): EpicManifestGame | null {
   if (typeof parsed !== 'object' || parsed === null) return null;
 
   const record = parsed as Record<string, unknown>;
+  if (!isGameCategory(record)) return null;
+
   const appName = pickString(record, 'AppName');
   const displayName = pickString(record, 'DisplayName');
   const installLocation = pickString(record, 'InstallLocation');

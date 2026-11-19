@@ -21,7 +21,8 @@ what the launchers already know, so you do not have to retype it.
 - Add, list and remove manual entries from the CLI.
 
 Not in this version: save backup, Steam shortcuts, artwork, local achievements, GOG, emulators. The
-interfaces are in place, the implementations are not.
+`GameSource` union and the `Scanner` and `LibraryStore` interfaces leave room for them, but no code
+for those features exists yet.
 
 ## Requirements
 
@@ -58,8 +59,10 @@ vialink add --title "Game" --path "D:\Games\Game" --exe "D:\Games\Game\game.exe"
 vialink remove <id>                       # remove by the id shown in list
 ```
 
+`--path` must be an existing directory; `add` refuses a path that is not there. `--exe` is optional.
+
 `scan` merges what it finds into the library. Entries you added by hand always win over a detected
-entry that points at the same folder.
+entry that points at the same folder, whichever one was stored first.
 
 Exit codes: `0` success, `1` the requested change could not be made, `2` the arguments were wrong.
 

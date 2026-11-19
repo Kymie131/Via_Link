@@ -1,7 +1,7 @@
 {
   "name": "vialink",
   "version": "0.1.0",
-  "description": "Detect installed games, back up saves to a private Git repo, and add them to Steam with artwork.",
+  "description": "Detect installed games and keep the library in one place, starting with Steam and Epic.",
   "keywords": [
     "steam",
     "game-library",
